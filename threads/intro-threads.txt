@@ -1,0 +1,261 @@
+What is a thread?
+-------------------
+
+Thread is the smallest unit of execution that can be scheduled by the operating system.
+
+A process is a group of associated threads that execute in the same shared environment.
+
+Shared environment means threads in the same process share the same memory space and can directly communicate with one another.
+
+A task is a single unit of work performed by a thread. 
+
+Operating systems use a thread scheduler to determine which threads should be currently executing.
+
+When a thread’s allotted time is complete but the thread has not finished processing, a context switch occurs.
+
+A context switch is the process of storing a thread’s current state and later restoring the state of the thread to continue execution.
+Be aware that there is often a cost associated with a context switch by way of lost time saving and reloading a thread’s state.
+
+
+User-defined thread v/s System threads
+-----------------------------------------
+A system thread is created by the JVM and runs in the background of the application eg the GC thread.
+
+A user-defined thread is one created by the application developer to accomplish a specific task. The main thread(which executes the main method)
+is a user defined thread.
+
+A daemon thread is one that will not prevent the JVM from exiting when the program finishes.
+
+NOTE: A Java application terminates when the only threads that are running are daemon threads.
+
+Both system and user-defined threads can be marked as daemon threads.(using Thread's setDaemon() method)
+Below program would never terminate because the user defined thread myThread never terminates:
+
+public static void main(String[] args) {
+    Thread myThread = new Thread(()-> { while(true){} });
+    myThread.start();
+    System.out.println("User defined thread started...");
+}
+
+Thread Priorities
+--------------------
+
+In Java, the thread priority levels range from 1 to 10. The priority 0 is reserved for the virtual machine.
+
+Java also provides a few predefined constants for setting the thread priority.
+MAX_PRIORITY designates the top priority of 10,
+MIN_PRIORITY designates the minimum priority of 1, and
+NORM_PRIORITY specifies the normal priority of 5.
+
+In most JVMs, however, the scheduler does use thread priorities in one important way:
+
+If a thread enters the runnable state, and it has a higher priority than any of the threads in the pool and a higher priority than the currently running thread, the lower-priority running thread usually will be bumped back to runnable and the highest-priority thread will be chosen to run.
+
+NOTE: Don’t rely on thread priorities when designing your multithreaded application.
+Because thread-scheduling priority behavior is not guaranteed, use thread priorities as a way to improve the efficiency of your program, but just be sure your program doesn’t depend on that behavior for correctness.
+
+Setting thread priorities :
+Thread t = new Thread(r);
+t.setPriority(8);
+
+Yield():
+---------
+static Thread.yield() :
+is used to make the currently running thread head back to runnable to allow other threads of the same priority to get their turn.
+NOTE: IT IS NOT A GURANTEED BEHAVIOR. The current thread may or maynot yield.
+
+In reality, though, the yield() method isn’t guaranteed to do what it claims, and even if yield() does cause a thread to step out of running and back to runnable, there’s no guarantee the yielding thread won’t just be chosen again over all the others!
+
+NOTE : yield() doesnot cause the current thread to go to a blocked state. It simply causes a running thread to be in a runnable thread(provided yield was successful).
+
+USAGE: Thread.yield();  ( use it in the same way as you would use Thread.sleep() )
+
+join()
+-----------
+
+The non-static join() method of class Thread lets one thread “join onto the end” of another thread.
+
+Thread t = new Thread();
+t.start();
+t.join();
+
+The preceding code takes the currently running thread and joins it to the end of the thread referenced by t .
+This blocks the current thread from becoming runnable until after the thread referenced by t is no longer alive.
+
+A word or two about "synchronized"
+-------------------------------------
+
+Every object in Java has a built-in lock that only comes into play when the object has synchronized method code.
+static methods too can be synchronized. In this case the class objects lock method comes to play.
+
+Inter thread communication - wait notify
+-------------------------------------------------
+
+The Object class has three methods, wait(), notify(), and notifyAll() that help threads communicate.
+
+NOTE: wait(), notify(), and notifyAll() must be called from within a synchronized context!
+A thread can’t invoke a wait or notify method ON AN OBJECT  unless it owns THAT OBJECT'S lock.
+
+wait() : It tells the calling thread to give up the lock and go to blocked state until some other thread enters the same monitor and calls notify().
+The wait() method RELEASES the lock prior to waiting and REACQUIRES the lock prior to returning from the wait() method. It is a NATIVE method.
+
+synchronized( lockObject )
+{
+    while( ! condition )
+    {
+        lockObject.wait();
+    }
+
+    //take the action here;
+}
+
+We should use "while" instead of "if" to handle spurious wakeups of threads (it's possible for thread to wake up spuriously even when waiting condition has not changed.)
+
+notify() : It wakes up one single thread that called wait() on the same object. It should be noted that calling notify() DOES NOT actually give up a
+LOCK on a resource. It tells a waiting thread that the thread can wake up. However, the lock is not actually given up until the notifier’s synchronized block
+has completed.
+
+General syntax for calling notify() method is like this:
+synchronized(lockObject)
+{
+    //establish_the_condition;
+
+    lockObject.notify();
+
+    //any additional code if needed
+}
+
+notifyAll() : It wakes up all the threads that called wait() on the same object.
+
+NOTE : wait() has a overloaded version which accepts a timeout:
+wait(long timeout): Causes the current thread to wait until either another thread invokes the notify() method or the notifyAll() method for this object,
+or a specified amount of time has elapsed.
+
+
+Producer/Consumer using wait and notify :
+--------------------------------------------
+
+public class ProducerConsumer {
+    public static void main(String[] args) throws InterruptedException {
+        Buffer buffer = new Buffer();
+
+        Thread consumer = new Thread(() -> {
+            IntStream.range(0, 10).forEach(value -> {
+                buffer.getValue();
+            });
+        });
+
+        Thread producer = new Thread(() -> {
+            IntStream.range(1, 11).forEach( value -> {
+                buffer.setValue(value);
+
+            });
+        });
+
+        consumer.start();
+        TimeUnit.SECONDS.sleep(10);
+        producer.start();
+    }
+
+}
+
+class Buffer {
+    private int value ;
+    private boolean isProduced;
+
+    public synchronized int getValue(){
+        while (!isProduced){
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        isProduced= false;
+        notify();
+        System.out.println("Consumed :: " + value);
+        return value;
+    }
+
+    public synchronized void setValue(int value){
+        while (isProduced){
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+
+        isProduced= true;
+        this.value = value;
+        System.out.println("Produced :: " + value);
+        notify();
+    }
+}
+
+notify v/s notifyAll()
+------------------------
+
+In some cases, all waiting threads can take useful action once the wait finishes. An example would be a set of threads waiting for a certain task to finish; once the task has finished, all waiting threads can continue with their business. In such a case you would use notifyAll() to wake up all waiting threads at the same time.
+
+Another case, for example mutually exclusive locking, only one of the waiting threads can do something useful after being notified (in this case acquire the lock). In such a case, you would rather use notify(). Properly implemented, you could use notifyAll() in this situation as well, but you would unnecessarily wake threads that can't do anything anyway.
+
+
+Print odd-even numbers using 2 threads , one printing odd nos and the other printing even numbers (using wait-notify)
+----------------------------------------------------------------------------------------------------------------------
+
+public class OddEven {
+    public static void main(String[] args) throws InterruptedException {
+        SharedPrinter printer = new SharedPrinter();
+
+        Thread evenThread = new Thread(() -> {
+            for (int i = 2; i <= 10; i = i + 2) {
+                printer.printEven(i);
+            }
+        });
+
+        Thread oddThread = new Thread(() -> {
+            for (int i = 1; i <= 10; i = i + 2) {
+                printer.printOdd(i);
+            }
+        });
+
+        evenThread.setName("EvenThread ::");
+        oddThread.setName("OddThread  ::");
+
+        evenThread.start();
+        TimeUnit.SECONDS.sleep(10);
+        oddThread.start();
+    }
+}
+
+class SharedPrinter {
+    private boolean oddProduced;
+
+    public synchronized void printOdd(int no) {
+        while (oddProduced){
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        oddProduced = true;
+        System.out.println(Thread.currentThread().getName() + no);
+        notify();
+    }
+
+    public synchronized void printEven(int no) {
+        while (!oddProduced){
+            try {
+                wait();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        oddProduced = false;
+        System.out.println(Thread.currentThread().getName() + no);
+        notify();
+    }
+}

@@ -1,0 +1,83 @@
+CopyOnWriteArrayList
+-----------------------
+It is a thread safe variant of ArrayList.
+
+It implements List hence, has methods like get and add .
+
+All mutative(add, remove, update) operations are done by making a fresh copy of the underlying array . 
+It is evident from the name also Copy on write whenever value is change create a copy. 
+
+NOTE: If there are a lot of mutations this data structure would lead to a very bad performance, since a new array would be created every time.
+It is more efficient when traversal operations vastly outnumber mutations.
+
+Traversals(read operations) are not synchronized(unlike Collections.synchronizedList() or Vector) i.e they dont use any kind of locking.
+It is useful when you cannot or don't want to synchronize traversals, yet need to prevent interference among concurrent threads(concurrent writes). 
+Throughput is more compared to Vector or Collections.synchronizedList() is cases where there are a lot of read operations. Since Vector and sychnronizedList use lock even for read opertaions.
+
+Here is basic structure of CopyOnWriteArrayList:
+
+class CopyOnWriteArrayList {
+
+	private volatile Object[] array;
+    private Object[] getArray() { return array; }
+  
+    private void setArray(Object[] a) { array = a; }
+ 
+    public boolean add(E e) {
+        final ReentrantLock lock = this.lock;
+        lock.lock();
+        try {
+            Object[] elements = getArray();
+            int len = elements.length;
+            Object[] newElements = Arrays.copyOf(elements, len + 1);
+            newElements[len] = e;
+            setArray(newElements);
+            return true;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public E get(int index) {
+        return get(getArray(), index);
+    }
+}
+
+Things to notice:  the internal array is volatile
+				   mutative operations like add uses a common lock object and creates a new array
+				   the get operation is not syncronized at all.
+
+Both the reads and writes are safe. The key to both is that the data for the array is stored internally in a volatile array and that the values in the array are immutable(very mutative operation creates a new array; once the array is created its value is not changed , rather a new array is created if the values need to be modified). Both the volatile and the immutable aspects are important.
+
+Reads against the list do not use synchronization. Instead they rely on always seeing the most recently modified version of the internal array due to the volatile. As you may or may not know, volatile arrays do not have volatile elements . So, a write to an index in the array would not necessarily be seen. However, the array is always immutable so this is never an issue. So that covers reads.
+
+Writes are different. To protect against simultaneous writes, any mutation methods are synchronized (similar to Vector). Internally, the modification is done by first copying the original list, performing the modification, then swapping the volatile array with the new array. So the synchronization protected writes against writes. And the volatile array reference guarantees that reads and writes see a consistent array. Consistent means view of the array is always from a single point in time ie. if you do a retrieval either you see all the old data in the array or the new data in the array BUT never a mixture of old and new data.
+
+If you see the underlying array reference is marked as volatile so that readers do not need to use a lock to see changes to the referenced array which means array update is an atomic operation and hence reads will always see the array in a consistent state. When a write operation occurs this volatile reference is only updated in the final statement via setArray() method. Up until this point any read operations will return elements from the old copy of the array. 
+Also, the write lock is required to prevent concurrent modification, which may result the array holding inconsistent data or changes being lost
+
+
+Iterators are supposed to see an old snapshot, so how does that happen? Well, when the iterator is created, it just gets a reference to the current array. Since it’s not going back to the variable in the original list, if that list replaces the array with a new instance, the iterator is no longer seeing the live array, just the array at the time it was created.
+
+Iterators for the CopyOnWriteArrayList uses a reference to the state of the array at the point that the iterator was created. You know by now any mutation will result in a fresh copy of the underlying array. Thus the array that the iterator has a reference to never changes during the lifetime of the iterator, so interference is impossible and the iterator is guaranteed not to throw ConcurrentModificationException.
+
+The iterator will not reflect additions, removals, or changes to the list since the iterator was created thus it is also known as "snapshot style" iterator.
+
+NOTE: Element-changing operations on iterators themselves (remove, set, and add) are not supported. These methods throw UnsupportedOperationException.
+
+Since iterator is not affected by the mutations thus multiple threads can iterate the collection without interference from one another or from threads wanting to modify the collection.
+
+
+NOTE: JDK ALSO PROVIDES CopyOnWriteArraySet which implements Set and internally uses CopyOnWriteArrayList hence, share the basic properties of that of a CopyOnWriteArrayList .
+
+Also, note if you try to sort CopyOnWriteArrayList using Collections.sort() then you would get an UnsupportedOperationException . The reason being sort() internally uses Iterator.set() but any mutative operation on the snapshot iterator would lead to UnsupportedOperationException :
+
+public static void sort(List list) {
+    Object[] a = list.toArray();
+    Arrays.sort(a);
+    ListIterator i = list.listIterator();
+    for (int j=0; j<a.length; j++) {
+      i.next();
+      i.set(a[j]);
+    }
+}    

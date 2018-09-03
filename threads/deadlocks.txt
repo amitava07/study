@@ -1,0 +1,263 @@
+When thread A holds lock L and tries to acquire lock M, but at the same time thread B holds M and tries to acquire L, both threads will wait forever. 
+This situation is the simplest case of deadlock (or deadly embrace), where multiple threads wait forever due to a cyclic locking dependency.
+
+Lock-ordering deadlock
+-----------------------
+
+A program will be free of lock-ordering deadlocks if all threads acquire the locks they need in a fixed global order.
+Below would lead to lock-ordering deadlock:
+
+class LeftRightDeadLock{
+    private final Object leftLock = new Object();
+    private final Object rightLock = new Object();
+
+    public void leftRight(){
+        synchronized (leftLock){
+            synchronized (rightLock){
+                // do something ...
+            }
+        }
+    }
+
+    public void rightLeft(){
+        synchronized (rightLock){
+            synchronized (leftLock){
+                // do something ...
+            }
+        }
+    }
+}
+
+Dynamic lock-ordering deadlock:
+--------------------------------
+    public static boolean transferAmount(Account fromAcct, Account toAcct, int amount){
+        synchronized (fromAcct){
+			synchronized (toAcct){
+				if(fromAcct.getCurrentBalance() >= amount){
+					fromAcct.debit(amount);
+					toAcct.credit(amount);
+					return true;
+				}
+			}
+        }
+		return false;
+    }
+	
+Deadlock can occur if two threads call transferMoney at the same time, one transferring from X to Y, and the other doing the opposite:
+	
+Thread A: transferMoney(acc1, acc2, 20);
+Thread B: transferMoney(acc2, acc1 ,25);
+
+
+Deadlock involving 2 cooperating object:
+------------------------------------------
+
+If two cooperating objects that have synchronized methods; each object calls the other's synchronized methods.  If one thread calls Model.updateModel() while another thread simultaneously calls View.updateView(), the first thread could obtain the Model's lock and wait for the View's lock, while the other obtains the View's lock and waits forever for the Model's lock.
+
+public class Model { 
+	private View myView;
+	public synchronized void updateModel(Object someArg) { 
+	  doSomething(someArg);
+	  myView.somethingChanged();
+	}
+	public synchronized Object getSomething() { 
+	  return someMethod();
+	}
+}
+
+public class View { 
+	private Model underlyingModel;
+	public synchronized void somethingChanged() { 
+	  doSomething();      
+	}
+	public synchronized void updateView() { 
+	  Object o = myModel.getSomething();
+	}
+}
+
+
+How to solve lock ordering dead locks
+--------------------------------------
+
+1. fixed global order of obtaining locks.
+2. Using timed locking
+3. Shrink synchronized blocks to avoid multiple locking
+
+NOTE: One of the best ways to prevent the potential for deadlock is to avoid acquiring more than one lock at a time, IF POSSIBLE.
+
+fixed global order of obtaining locks.
+----------------------------------------
+The above code would be free from deadlock if the locks are acquired always in the same order irrespective of the order of the arguments to the transferAmount() method.
+System.identityHashCode() could be used to impose a fixed global ordering of lock.
+
+System.identityHashCode():
+Returns the same hash code for the given object as would be returned by the default method hashCode(), whether or not the given object's class overrides hashCode().
+
+Object.hashCode():
+As much as is reasonably practical, the hashCode method defined by class Object does return distinct integers for distinct objects. (This is typically implemented by converting the internal address of the object into an integer, but this implementation technique is not required by the Java programming language.) 
+NOTE: there is a possiblity of collision ie 2 distinct objects may have the same hashCode() - it depends how JVM has implemented Object's hasCode() but a possibility always remain.
+
+public class Main {
+    private static final Object tieLock = new Object();
+	
+    public void transferMoney(final Account fromAcct,
+                              final Account toAcct,
+                              final int amount)
+            throws Exception {
+
+        class Helper {
+            public void transfer() throws Exception {
+                if (fromAcct.getCurrentBalance() < amount)
+                    throw new Exception();
+                else {
+                    fromAcct.debit(amount);
+                    toAcct.credit(amount);
+                }
+            }
+        } //end of helper
+
+
+        int fromHash = System.identityHashCode(fromAcct);
+        int toHash = System.identityHashCode(toAcct);
+        if (fromHash < toHash) {
+            synchronized (fromAcct) {
+                synchronized (toAcct) {
+                    new Helper().transfer();
+                }
+            }
+        } else if (fromHash > toHash) {
+            synchronized (toAcct) {
+                synchronized (fromAcct) {
+                    new Helper().transfer();
+                }
+            }
+        } else {
+            synchronized (tieLock) {
+                synchronized (fromAcct) {
+                    synchronized (toAcct) {
+                        new Helper().transfer();
+                    }
+                }
+            }
+        }
+    }
+} //end of Main
+
+With the above code 
+Thread A: transferMoney(acc1, acc2, 20);
+Thread B: transferMoney(acc2, acc1 ,25);
+would not lead to deadlock.
+
+NOTE : the tieLock is needed for the below scenario:
+Thread A: transferMoney(acc1, acc2, 20);
+Thread B: transferMoney(acc2, acc1 ,25);
+
+but acc1 and acc2 have same hashCode(). They are 2 separate objects but their hasCode() is same.
+
+NOTE: If Account has a unique, immutable, comparable key such as an account number, inducing a lock ordering is even easier: order objects by their key, thus eliminating the need for the tie-breaking lock.
+
+public void transferMoney(Account fromAccount,  Account toAccount, int amount) { 
+
+    Account firstLock, secondLock;
+	
+    if (fromAccount.accountNumber() == toAccount.accountNumber()) {
+      throw new Exception("Cannot transfer from account to itself");
+	}
+    else if (fromAccount.accountNumber() < toAccount.accountNumber()) {
+      firstLock = fromAccount;
+      secondLock = toAccount;
+    }
+    else {
+      firstLock = toAccount;
+      secondLock = fromAccount;
+    }
+    
+	synchronized (firstLock) {
+      synchronized (secondLock) { 
+        if (fromAccount.hasSufficientBalance(amount) { 
+          fromAccount.debit(amount); 
+          toAccount.credit(amount);
+        }
+      }
+    }
+}
+
+Using timed locking
+--------------------
+Try acquiring a lock , if not available return immediately and again try after some time. THis can be achieved by using ReentrantLock:
+
+    public static boolean transferAmount(Account fromAcct, Account toAcct, int amount){
+        long startTime  = System.currentTimeMillis();
+        long maxDuration = 1000l;
+
+        while(true){
+            if (fromAcct.lock.tryLock()){
+                try {
+                    if (toAcct.lock.tryLock()) {
+                        try {
+                            if (fromAcct.getCurrentBalance() >= amount) {
+                                fromAcct.debit(amount);
+                                toAcct.credit(amount);
+                                return true;
+                            }
+                        } finally {
+                            toAcct.lock.unlock();
+                        }
+                    } //end of toAcct if block
+                } finally {
+                    fromAcct.lock.unlock();
+                } 
+            } //end of fromAcct if block
+
+            if(System.currentTimeMillis() - startTime >= maxDuration){
+                return false;
+            }
+        } //end while
+    }
+	
+public class Account {
+    public Lock lock = new ReentrantLock();
+
+    public void debit(int amount) {
+    }
+
+    public void credit(int amount) {
+    }
+
+    public int getCurrentBalance() {
+        return 0;
+    }
+}
+
+Shrink synchronized blocks to avoid multiple locking
+-----------------------------------------------------
+You can usually avoid the sort of potential deadlocks that occur from cooperating objects usecase by narrowing the synchronization's scope to as small a block as possible. Does Model.updateModel() really need to hold the Model lock while it calls View.somethingChanged()? Often it does not; 
+
+Starvation
+---------------
+Starvation describes a situation where a thread is unable to gain regular access to shared resources and is unable to make progress. This happens when shared resources are made unavailable for long periods by "greedy" threads(say a high priority thread). For example, suppose an object provides a synchronized method that often takes a long time to return. If one thread invokes this method frequently, other threads that also need frequent synchronized access to the same object will often be blocked.
+
+The thread priorities defined in the Thread API are merely scheduling hints. The Thread API defines ten priority levels .In most Java applications, all application threads have the same priority, Thread.NORM_PRIORITY. The thread priority mechanism is a blunt instrument, and it's not always obvious what effect changing priorities will have; boosting a thread's priority might do nothing or might always cause one thread to be scheduled in preference to the other, causing starvation.
+
+Avoid the temptation to use thread priorities, since they can cause liveness problems. Most concurrent applications can use the default priority for all threads.
+
+Livelock
+--------------
+Incase of deadlock, the threads go to a blocked state i.e they are not running or they are not in a runnable state rather they are in a blocked state. 
+With livelock, threads are in a running state. 
+
+In livelock, threads keeps retrying an operation that will always fail and hence not able to make further progress.
+
+Livelock often occurs in transactional messaging applications, where the messaging infrastructure rolls back a transaction if a message cannot be processed successfully, and puts it back at the head of the queue. 
+If a bug in the message handler for a particular type of message causes it to fail, every time the message is dequeued and passed to the buggy handler, the transaction is rolled back. 
+
+Since the message is now back at the queue, the handler is called over and over with the same result. The message handling thread is not blocked, but it will never make progress either. 
+
+Livelock can also occur when multiple cooperating threads change their state in response to the others in such a way that no thread can ever make progress. 
+This is comparable to two people attempting to pass each other in a corridor: Alphonse moves to his left to let Gaston pass, while Gaston moves to his right to let Alphonse pass. Seeing that they are still blocking each other, Alphone moves to his right, while Gaston moves to his left. They're still blocking each other, so...
+
+Thread dumps
+------------
+A thread dump includes a stack trace for each running thread, similar to the stack trace that accompanies an exception. Thread dumps also include locking information, such as which locks are held by each thread, in which stack frame they were acquired, and which lock a blocked thread is waiting to acquire.
+
+To trigger a thread dump, you can send the JVM process a SIGQUIT signal (kill -3) on Unix platforms.

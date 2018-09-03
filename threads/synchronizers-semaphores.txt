@@ -1,0 +1,216 @@
+Synchronizers:
+It maintains a state, and depending on its state, it lets a thread pass through or forces it to wait.
+
+four types of synchronizers:
+1. Semaphores
+2. Barriers
+3. Latches
+4. Exchangers
+
+
+##############
+Semaphores
+##############
+
+A Semaphore controls the no. of threads that can access a given resource.
+While a synchronized block ensures only a single thread can access a resource at a given time, Semaphore ensures only a N no. of threads can access a resource
+at a given time.
+
+If N is set to one, a semaphore is then equivalent to a synchronized block i.e only one thread at a time can access a resource protected by the semaphore.
+
+A semaphore maintains a number of virtual permits. To access a resource, a thread acquires a permit( by calling acquire() ) and it releases ( by calling release() )  the permit when it is done with the resource. 
+If a permit is not available, the requesting thread IS BLOCKED until a permit becomes available.
+
+The constructor for this class optionally accepts a fairness parameter : Semaphore(int permits, boolean fair)
+When fairness is set true, the semaphore guarantees that threads invoking any of the acquire methods are selected to obtain permits in the order in which their invocation of those methods was processed (first-in-first-out; FIFO)
+
+A semaphore initialized to one, and which is used such that it only has at most one permit available, can serve as a mutual exclusion lock. This is more commonly known as a binary semaphore, because it only has two states: one permit available, or zero permits available. When used in this way, the binary semaphore has the property (unlike many Lock implementations), that the "lock" can be released by a thread other than the owner (as semaphores have no notion of ownership). This can be useful in some specialized contexts, such as deadlock recovery or while solving producer-consumer problem.
+
+Impt methods:
+-------------
+
+acquire() - blocking call, Acquires a permit from this semaphore, blocking until one is available, or the thread is interrupted.
+
+tryAcquire() - returns boolean, non blocking call i.e returns immediately ; Acquires a permit from this semaphore, only if one is available at the time of invocation.
+
+EG: Saya a bank has 2 tellers , customer should stand in a queue and should acquire a permit, on successfully acquiring the permit he would be serviced by the teller guy:
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Here there are ten customers each represented by a thread.
+
+public class Bank {
+    static Semaphore semaphore = new Semaphore(2,true);
+    public static void main(String[] args) {
+        IntStream.range(1, 11).forEach((count) ->{
+            Thread t = new Thread(() -> {
+                Bank.getService(count);
+            });
+            t.start();
+        });
+    }
+
+    public static void getService(int customerNo){
+        try {
+            semaphore.acquire();
+            System.out.println("Servicing customer no: "+ customerNo);
+
+            Thread.sleep((long)Math.random() * 10);
+
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }finally {
+            semaphore.release();
+        }
+    }
+}
+
+Semaphores are often used to restrict the number of threads than can access some (physical or logical) resource:
+------------------------------------------------------------------------------------------------------------------
+Here at max 10 threads can access the Pooled objects:
+
+public class Pool {
+    private final Semaphore semaphore = new Semaphore(10, true);
+    private PooledObject[] objPool = null;
+
+    public PooledObject getPooledObject() throws InterruptedException {
+        semaphore.acquire();
+        return getNextAvailableObject();
+    }
+
+    public void release(PooledObject pooledObject){
+        synchronized (this){
+            pooledObject.used = false;
+
+        }
+        semaphore.release();
+    }
+
+    private synchronized PooledObject getNextAvailableObject(){
+        for(PooledObject obj : objPool){
+            if( !obj.used){
+                obj.used = true;
+                return obj;
+            }
+        }
+        return null;
+    }
+
+    class PooledObject {
+        boolean used;
+    }
+}
+
+producer-consumer using semaphores:
+------------------------------------
+
+Semaphore on producer is created with permit =1. So, that producer can get the permit to produce.
+Semaphore on consumer is created with permit =0. So, that consumer could wait for permit to consume. [because initially producer hasn’t produced any product]
+
+public class ProducerConsumer {
+    public static void main(String[] args) throws InterruptedException {
+        Buffer buffer = new Buffer();
+
+        Thread consumer = new Thread(() -> {
+            IntStream.range(0, 10).forEach(value -> {
+                try {
+                    buffer.getValue();
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            });
+        });
+
+        Thread producer = new Thread(() -> {
+            IntStream.range(0, 10).forEach( value -> {
+                try {
+                    buffer.setValue(value);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+
+            });
+        });
+
+        consumer.start();
+        TimeUnit.SECONDS.sleep(10);
+        producer.start();
+    }
+
+}
+
+class Buffer {
+    private int value ;
+    private Semaphore prodSemaphore = new Semaphore(1);
+    private Semaphore conSemaphore = new Semaphore(0);
+
+    public int getValue() throws InterruptedException{
+        conSemaphore.acquire();
+        System.out.println("Consumed :: " + value);
+        prodSemaphore.release();
+        return value;
+
+
+    }
+
+    public void setValue(int value) throws InterruptedException {
+        prodSemaphore.acquire();
+        this.value = value;
+        System.out.println("Produced :: " + value);
+        conSemaphore.release();
+    }
+}
+
+
+Print odd-even numbers using 2 threads , one printing odd nos and the other printing even numbers (using Semaphores)
+---------------------------------------------------------------------------------------------------------------------
+
+public class OddEven {
+    public static void main(String[] args) throws InterruptedException {
+        Printer printer = new Printer();
+
+        Thread evenThread = new Thread(() -> {
+            for (int i = 2; i <= 10; i = i + 2) {
+                printer.printEven(i);
+            }
+        });
+
+        Thread oddThread = new Thread(() -> {
+            for (int i = 1; i <= 10; i = i + 2) {
+                printer.printOdd(i);
+            }
+        });
+
+        evenThread.setName("EvenThread ::");
+        oddThread.setName("OddThread  ::");
+
+        evenThread.start();
+        TimeUnit.SECONDS.sleep(10);
+        oddThread.start();
+    }
+}
+
+class Printer {
+    private Semaphore oddSemaphore = new Semaphore(1);
+    private Semaphore evenSemaphore = new Semaphore(0);
+
+    public void printOdd(int no) {
+        try {
+            oddSemaphore.acquire();
+            System.out.println(Thread.currentThread().getName() + no);
+            evenSemaphore.release();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+
+    }
+
+    public void printEven(int no) {
+        try {
+            evenSemaphore.acquire();
+            System.out.println(Thread.currentThread().getName() + no);
+            oddSemaphore.release();
+        } catch (InterruptedException e) {
+            e.printStackTrace();
+        }
+    }
+}

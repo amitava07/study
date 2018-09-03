@@ -1,0 +1,207 @@
+Before Java 5.0, the only mechanisms for coordinating access to shared data were volatile and synchronized
+After Java 5 we have ReentrantLock.
+
+ReentrantLock is not a replacement for intrinsic locking, but rather an alternative with advanced features for when intrinsic locking proves too limited.
+
+Lock interface:
+---------------
+Unlike intrinsic locking, Lock offers a choice of 
+		unconditional, 
+		polled and timed, and 
+		interruptible lock acquisition, 
+All lock and unlock operations are explicit. 
+
+public interface Lock {
+	void lock();
+	void lockInterruptibly() throws InterruptedException;
+	boolean tryLock();
+	boolean tryLock(long timeout, TimeUnit unit) throws InterruptedException;
+	void unlock();
+	Condition newCondition();
+}
+
+Note: When using explicit locks, the lock must be released in a finally block.Otherwise, the lock would never be released if the guarded code were to throw an exception.
+
+Lock lock = new ReentrantLock();
+...
+lock.lock();
+try {
+	// update object state
+	// catch exceptions and restore invariants if necessary
+} finally {
+	lock.unlock();
+}
+
+When many threads are all contending for the same lock, the total throughput is generally going to be better with ReentrantLock than with synchronized.
+
+What do we mean by a reentrant lock? Simply that there is an acquisition count associated with the lock, and if a thread that holds the lock acquires it again, the acquisition count is incremented and the lock then needs to be released twice to truly release the lock. 
+
+This is same as the semantics of synchronized; if a thread enters a synchronized block protected by a monitor that the thread already owns, the thread will be allowed to proceed, and the lock will not be released when the thread exits the second (or subsequent) synchronized block, but only will be released when it exits the first synchronized block it entered protected by that monitor.
+
+Polled and timed locking:
+--------------------------
+
+Note: tryLock() Acquires the lock if it is not held by another thread and returns immediately with the value true, setting the lock hold count to one.
+If the lock is held by another thread then this method will return immediately with the value false.
+Even when this lock has been set to use a fair ordering policy, a call to tryLock() will immediately acquire the lock if it is available, whether or not other threads are currently waiting for the lock.
+
+Note: boolean tryLock(long timeout, TimeUnit unit) throws InterruptedException;
+Acquires the lock if it is not held by another thread within the given waiting time and the current thread has not been interrupted. 
+Acquires the lock if it is not held by another thread and returns immediately with the value true, setting the lock hold count to one. If this lock has been set to use a fair ordering policy then an available lock will not be acquired if any other threads are waiting for the lock.
+
+If the lock is held by another thread then the current thread goes to a blocked state; it returns from the blocked state when one of three things happens:
+
+    The lock is acquired by the current thread; or
+    Some other thread interrupts the current thread; or
+    The specified waiting time elapses 
+	
+	
+This type of locking(used by the tryLock methods) is called timed and polled locking and they prevent in DEADLOCKS.
+
+The below code can result in dead lock:
+
+    public static boolean transferAmount(Account fromAcct, Account toAcct, int amount){
+        long startTime  = System.currentTimeMillis();
+        long maxDuration = 1000l;
+
+        while(true){
+            synchronized (fromAcct){
+                synchronized (toAcct){
+                    if(fromAcct.getCurrentBalance() >= amount){
+                        fromAcct.debit(amount);
+                        toAcct.credit(amount);
+                        return true;
+                    }
+                }
+            }
+
+            if(System.currentTimeMillis() - startTime >= maxDuration){
+                return false;
+            }
+        } //end while
+
+    }
+	
+Thread A: transferMoney(acc1, acc2, 20);
+Thread B: transferMoney(acc2, acc1 ,25);
+
+Implementing the above eg using polled and timed locking (would not result in deadlock):
+
+    public static boolean transferAmount(Account fromAcct, Account toAcct, int amount){
+        long startTime  = System.currentTimeMillis();
+        long maxDuration = 1000l;
+
+        while(true){
+            if (fromAcct.lock.tryLock()){
+                try {
+                    if (toAcct.lock.tryLock()) {
+                        try {
+                            if (fromAcct.getCurrentBalance() >= amount) {
+                                fromAcct.debit(amount);
+                                toAcct.credit(amount);
+                                return true;
+                            }
+                        } finally {
+                            toAcct.lock.unlock();
+                        }
+                    } //end of toAcct if block
+                } finally {
+                    fromAcct.lock.unlock();
+                } 
+            } //end of fromAcct if block
+
+            if(System.currentTimeMillis() - startTime >= maxDuration){
+                return false;
+            }
+        } //end while
+    }
+
+Interruptible Lock Acquisition:
+---------------------------------
+
+public void lockInterruptibly() throws InterruptedException :
+Acquires the lock if it is not held by another thread and returns immediately, setting the lock hold count to one. 
+
+If the lock is held by another thread then the current thread goes to a blocked state and comes to a runnable state when:
+    The lock is acquired by the current thread; or
+    Some other thread interrupts the current thread. 
+
+EG:	
+    public static void main(String[] args) throws InterruptedException {
+        DVD dvd =  new DVD();
+        dvd.lock.lock();
+
+        Thread t = new Thread(() -> Main.doSomeWork(dvd));
+        t.start();
+
+        TimeUnit.SECONDS.sleep(120);
+        System.out.println("About to interrupt");
+
+        t.interrupt();
+    }
+
+    public static void doSomeWork(DVD dvd){
+        try {
+            dvd.lock.lockInterruptibly();
+            
+            try{
+                // do some meaningful work....
+            }finally{
+                dvd.lock.unlock();
+            }
+        } catch (InterruptedException e) {
+            System.out.println("Interrupted ...");
+        }
+    }
+	
+
+	
+Note: The timed tryLock is also responsive to interruption.	
+
+The ReentrantLock constructor offers a choice of two fairness options: create a nonfair lock (the default) or a fair lock:
+ReentrantLock(boolean fair)
+
+Threads acquire a fair lock in the order in which they requested it, whereas a nonfair lock permits barging: threads requesting a lock can jump ahead of the queue of waiting threads if the lock happens to be available when it is requested. 
+
+NOTE: Scheduling applies to runnable threads. The scheduler chooses the next runnable thread to execute -- based on priority, time since last run, etc. And yes, all current JVM implementations do use the native scheduler to schedule the thread.
+
+Lock fairness applies to blocked threads -- specifically, the threads that are blocked on the lock. It is the lock that decides which thread to moved into the runnable state, and hence, can be scheduled. The other threads are still blocked, and hence, can't be scheduled.
+
+Nonfair ReentrantLocks do not go out of their way to promote barging—they simply don't prevent a thread from barging if it shows up at the right time.
+
+One reason barging locks perform so much better than fair locks under heavy contention is that there can be a significant delay between when a suspended thread is resumed and when it actually runs. Let's say thread A holds a lock and thread B asks for that lock. Since the lock is busy, B is suspended. When A releases the lock, B is resumed so it can try again. In the meantime, though, if thread C requests the lock, there is a good chance that C can acquire the lock, use it, and release it before B even finishes waking up. In this case, everyone wins: B gets the lock no later than it otherwise would have, C gets it much earlier, and throughput is improved. 
+
+
+ReentrantLock is an advanced tool for situations where intrinsic locking is not practical. Use it if you need its advanced features: timed, polled, or interruptible lock acquisition, fair queueing, or non-block-structured locking. Otherwise, prefer synchronized.
+
+Read-write Locks:
+------------------
+
+Reentrant lock is a mutual-exclusion lock i.e only one thread at a time can access a shared resource. In cases where there are  a lot of read operations this becomes a fairly rigid mechanism. In comes the ReadWrite lock : a resource can be accessed by multiple readers or a single writer at a time, but not both.
+i.e The locking strategy implemented by read-write locks allows multiple SIMULTANEOUS(simultaneous means at the same time) readers but only a single writer.
+
+read lock may be held simultaneously by multiple reader threads, so long as there are no writers. The write lock is exclusive i.e if held no readers or writers are allowed.
+
+interface ReadWriteLock{
+	Lock readLock();
+	Lock writeLock();
+}
+
+To read data guarded by a ReadWriteLock you must first acquire the read lock, 
+and to modify data guarded by a ReadWriteLock you must first acquire the write lock.
+
+While there may appear to be two separate locks, the read lock and write lock are simply different views of an integrated read-write lock object.
+
+In practice, read-write locks can improve performance for frequently accessed read-mostly data structures on multiprocessor systems; under other conditions they perform slightly worse than exclusive locks due to their greater complexity. Whether they are an improvement in any given situation is best determined via profiling;
+
+
+ReentrantReadWriteLock provides reentrant locking semantics for both locks. Like ReentrantLock, a ReentrantReadWriteLock can be constructed as nonfair (the default) or fair.
+
+With a fair lock, preference is given to the thread that has been waiting the longest; 
+
+NOTE : one should not forget to unlock() on completion of their task:  
+ReadWriteLock l = new ReentrantReadWriteLock();
+l.readLock().unlock();
+l.writeLock().unlock()
+ 
+	

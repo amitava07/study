@@ -1,0 +1,53 @@
+The volatile keyword in Java is used as an indicator to Java thread that do not cache value of this variable and always read it from main memory.
+
+If you want to share any variable in which read and write operation is atomic by implementation e.g. read and write in an int or a boolean variable then  you can declare them as volatile variable.
+
+Every read of a volatile variable will be read from the computer's main memory, and not from the CPU cache, and that every write to a volatile variable will be written to main memory, and not just to the CPU cache.
+
+Usage of volatile:
+public class Logger {
+    private static volatile Logger instance;
+
+    private Logger(){
+    }
+
+    public static Logger getInstance(){
+        if (instance == null){
+            synchronized (Logger.class){
+                if(instance == null){
+                    instance = new Logger();
+                }
+            }
+        }
+        return instance;
+    }
+}
+
+If we do not make the instance variable volatile than the Thread which is creating instance of Logger is not able to communicate other thread, that instance has been created until it comes out of the synchronized block, so if Thread A is creating Logger instance and just after creation lost the CPU, all other thread will not be able to see value of instance as not null and they will believe its still null.
+
+Why? because reader threads are not doing any locking and until writer thread comes out of synchronized block, memory will not be synchronized and value of instance will not be updated in main memory. With Volatile keyword in Java, this is handled by Java itself and such updates will be visible by all reader threads.
+
+The Java volatile Happens-Before Guarantee
+-------------------------------------------
+
+1. If Thread A writes to a volatile variable and Thread B subsequently reads the same volatile variable, then all variable values changed by Thread A before writing the volatile variable, will also be visible to Thread B after it has read the volatile variable. 
+EG:
+
+Thread 1
+	answer = 42
+	READY = true
+	
+Thread 2
+	if (READY)
+	print answer
+	
+here READY is a volatile variable , while answer is a non-volatile variable.
+
+The first thread writes to ready, which is going to be the sender side of the communications. The second thread reads from ready and sees the value the first thread wrote to it. It therefore becomes a receiver. Because this communication occurs, all of the memory contents seen by Thread 1, before it wrote to ready, must be visible to Thread 2, after it reads the value true for ready.
+
+This guarantees that Thread 2 will print "42", if it prints anything at all.
+
+NOTE: If READY was updated before answer by Thread 1 , then Thead 2 may or maynot see the updated value of answer.
+
+http://tutorials.jenkov.com/java-concurrency/volatile.html
+

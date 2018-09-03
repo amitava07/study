@@ -1,0 +1,119 @@
+The java.util.concurrent.atomic package enables multithreaded applications to safely access individual variables without explicit locking.
+
+count++ is not a an atomic operation. This involves 3 steps : read value the of count variable, then increment it and finally assign the incremented value to the variable. 
+So such an operation is not thread safe.
+
+The java.util.concurrent.atomic package provide variables whose values can be modified atomically without using any synchronized block.
+
+The java.util.concurrent.atomic package provides several classes for different data types, such as AtomicInteger, AtomicLong, AtomicBoolean, and AtomicReference, to name a few.
+
+public class Counter {
+    private AtomicInteger count = new AtomicInteger();
+
+    public void increment(){
+        count.getAndIncrement();
+    }
+    
+    public int getValue(){
+        return count.get();
+    }
+}
+
+In reality, even a method such as getAndIncrement() still takes several steps to execute. The reason this implementation is now thread-safe is something called CAS. 
+CAS stands for Compare And Swap. 
+Most modern CPUs have a set of CAS instructions. 
+A basic outline of what is happening now is as follows:
+
+1. The value stored in count is copied to a temporary variable.
+2. The temporary variable is incremented.
+3. Compare the value currently in count with the original value. If it is unchanged, then swap the old value for the new value.
+
+NOTE: Step 3 happens atomically. 
+
+If step 3 finds that some other thread has already modified the value of count, then repeat steps 1–3 until we increment the field without interference.
+
+The central method in a class like AtomicInteger is the boolean compareAndSet(int expect, int update) method, which provides the CAS behavior. Other atomic methods delegate to the compareAndSet method. The getAndIncrement method implementation is simply:
+
+public int getAndIncrement(){
+        for(;;){
+            int currentValue = count.get();
+            boolean success = count.compareAndSet(currentValue, currentValue + 1);
+            if (success){
+                return currentValue;
+            }
+        }
+}
+
+NOTE: CAS is non-blocking algorithm to achieve thread safety. There are other non-blocking algorithms.
+
+AtomicReference
+--------------------
+AtomicReference allows an object reference to be updated atomically.
+
+Below code is not thread safe if the invariant is lowerBound <= upperBound
+
+public class NumberRange {
+    private AtomicInteger lowerBound = new AtomicInteger(0); //invariant:: lowerBound <= upperBound
+    private AtomicInteger upperBound = new AtomicInteger(0);
+
+    public void setLowerBound(int value){
+        if(value > upperBound.get()){
+            throw new IllegalArgumentException();
+        }
+        lowerBound.set(value);
+    }
+
+    public void setUpperBound(int value){
+        if(value < lowerBound.get()){
+            throw new IllegalArgumentException();
+        }
+        upperBound.set(value);
+    }
+}
+
+say the lower bound is 0 and upperBound is 10, then setLowerBound(3) and setUpperBound(2) is called concurrently. Due to unlucky timings lowerBound can become 4 and upperBound 3.
+
+
+Using CAS this can be made thread safe using AtomicReference :
+
+public class CasNumberRange {
+
+    private static class IntPair {
+        private int lowerBound = 0;
+        private int upperBound = 0; //invariant lowerBound <= upperBound
+
+        public IntPair(int lowerBound, int upperBound) {
+            this.lowerBound = lowerBound;
+            this.upperBound = upperBound;
+        }
+    }
+    private AtomicReference<IntPair> reference = new AtomicReference<>(new IntPair(0, 0));
+
+    public int getLower(){
+        return reference.get().lowerBound;
+    }
+
+    public void setLowerBound(int value) {
+        while (true) {
+            IntPair currRef = reference.get();
+            if (value > currRef.upperBound) {
+                throw new IllegalArgumentException();
+            }
+
+            IntPair newRef = new IntPair(value, currRef.upperBound);
+            if (reference.compareAndSet(currRef, newRef) {
+                return;
+            }
+        }
+    }
+}
+
+
+There also exists AtomicIntegerArray, AtomicLongArray, AtomicReferenceArray
+
+The Java AtomicIntegerArray class (java.util.concurrent.atomic.AtomicIntegerArray) represents an array of int . The int elements in the AtomicIntegerArray can be updated atomically. The AtomicIntegerArray also supports compare-and-swap functionality. 
+
+eg:
+int[] ints = new int[10];
+ints[5] = 123;
+AtomicIntegerArray array = new AtomicIntegerArray(ints);

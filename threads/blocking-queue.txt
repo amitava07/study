@@ -1,0 +1,198 @@
+Blocking Queues:
+----------------
+
+BlockingQueue extends Queue interface. BlockingQueue implementations are designed to be used primarily for producer-consumer problems.
+A blocking queue is a queue that blocks when a thread tries to dequeue from an empty queue or tries to enqueue an item into a full queue. 
+NOTE: BlockingQueue is an interface in java api.
+
+The producerconsumer pattern simplifies development because it removes code dependencies between producer and consumer classes, and simplifies workload management by decoupling activities that may produce or consume data at different or variable rates. Also produces need not be aware of the consumers and vice-versa .
+
+
+
+Impt methods
+---------------
+put() and take() :  both of these are blocking methods and throw InterruptedException . 
+					put() has a void return type(does not return anything). 
+					Both these methods throw InterruptedException .
+ 	
+offer() and poll() : they are blocking calls till they timeout
+	
+boolean offer(E e, long timeout, TimeUnit unit): Inserts the specified element into this queue, waiting up to the specified wait time if necessary for space to become available.
+												 a return type of false means the operation was not successful.
+
+E poll(long timeout, TimeUnit unit): 			 Retrieves and removes the head of this queue, waiting up to the specified wait time if necessary for an element to become available.
+
+Another impt method:
+drainTo(Collection<? super E> c): Removes all available elements from this queue and adds them to the given collection.
+
+NOTE: When a method can throw InterruptedException, it is telling you that it is a blocking method, and further that if it is interrupted, it will make an effort to stop blocking early. eg: put() and take() .
+
+Types of BlockingQueue
+-----------------------
+
+The class library contains several implementations of BlockingQueue. 
+	LinkedBlockingQueue and ArrayBlockingQueue:  are FIFO queues, analogous to LinkedList and ArrayList but with better concurrent performance than a synchronized List.
+	PriorityBlockingQueue : is a priority-ordered queue, which is useful when you want to process elements in an order other than FIFO. 
+							Just like other sorted collections, PriorityBlockingQueue can compare elements according to their natural order (if they implement Comparable) or using a Comparator.
+							
+NOTE: LinkedBlockingQueue and PriorityBlockingQueue are unbounded and so can cause resource exhaustion.
+
+
+Deques(pronounced “deck”) and Work Stealing
+--------------------------------------------
+Java 6 also adds another two collection types, Deque (pronounced “deck”) and BlockingDeque, that extend Queue and BlockingQueue. A Deque is a doubleended queue that allows efficient insertion and removal from both the head and the tail. Implementations include ArrayDeque and LinkedBlockingDeque.
+
+Just as blocking queues lend themselves to the producer-consumer pattern, deques lend themselves to a related pattern called work stealing. 
+A producerconsumer design has one shared work queue for all consumers; in a work stealing design, every consumer has its own deque.
+ 
+If a consumer exhausts the work in its own deque, it can steal work from the tail(instead of head) of someone else's deque. Work stealing can be more scalable than a traditional producer-consumer design because workers don't contend for a shared work queue; most of the time they access only their own deque, reducing contention. 
+
+Work stealing is well suited to problems in which consumers are also producers.
+
+A simple producer consumer using BlockingQueue
+-----------------------------
+
+public class Main {
+
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+        BlockingQueue<Integer> queue = new ArrayBlockingQueue<>(10);
+
+        ExecutorService svc = Executors.newFixedThreadPool(2);
+        Consumer consumer = new Consumer(queue);
+        Producer producer = new Producer(queue);
+
+        svc.submit(consumer);
+        svc.submit(producer);
+
+        svc.shutdown();
+        svc.awaitTermination(30, TimeUnit.SECONDS);
+
+    }
+}
+
+class Producer implements Callable<Boolean> {
+    private BlockingQueue<Integer> queue;
+
+    Producer(BlockingQueue<Integer> queue) {
+        this.queue =  queue;
+    }
+
+    @Override
+    public Boolean call() {
+        for(int i = 0; i < 10; i++){
+            try {
+                queue.put(i);
+                System.out.println("Produced:: "+ i);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return true;
+    }
+}
+
+class Consumer implements Callable<Boolean> {
+    private BlockingQueue<Integer> queue;
+
+    Consumer(BlockingQueue<Integer> queue) {
+        this.queue =  queue;
+    }
+
+    @Override
+    public Boolean call() {
+        for(int i = 0; i < 10; i++){
+            try {
+                int value = queue.take();
+                System.out.println("Consumed:: "+ value);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return true;
+    }
+}
+
+
+A sophisticated producer consumer
+-----------------------------------
+
+One can use a POISON PILL to indicate that all producers are done and so consumers should stop :
+
+public class Main {
+
+    public static void main(String[] args) throws ExecutionException, InterruptedException {
+
+        //posion pill is any object to indicate consumers should stop
+        int poisonPill = Integer.MAX_VALUE;
+
+        BlockingQueue<Integer> queue = new ArrayBlockingQueue<>(10);
+
+        ExecutorService svc = Executors.newFixedThreadPool(2);
+        Consumer consumer = new Consumer(queue, poisonPill);
+        Producer producer = new Producer(queue);
+
+        svc.submit(consumer);
+        Future<Boolean>  producerFuture = svc.submit(producer);
+
+        //Future.get() is a blocking call
+        if(producerFuture.get()){
+
+            // all producers are done producing since get() has returned true
+            // so, put a poison pill at the end of the queue to indicate consumers should stop
+            queue.put(poisonPill);
+
+        }
+        svc.shutdown();
+        svc.awaitTermination(30, TimeUnit.SECONDS);
+
+    }
+}
+
+class Producer implements Callable<Boolean> {
+    private BlockingQueue<Integer> queue;
+
+    Producer(BlockingQueue<Integer> queue) {
+        this.queue =  queue;
+    }
+
+    @Override
+    public Boolean call() {
+        for(int i = 0; i < 10; i++){
+            try {
+                queue.put(i);
+                System.out.println("Produced:: "+ i);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        return true;
+    }
+}
+
+class Consumer implements Callable<Boolean> {
+    private BlockingQueue<Integer> queue;
+    private Integer poisonPill;
+
+    Consumer(BlockingQueue<Integer> queue, Integer poisonPill) {
+        this.queue =  queue;
+        this.poisonPill = poisonPill;
+    }
+
+    @Override
+    public Boolean call() {
+        while(true){
+            try {
+                int value = queue.take();
+                if(poisonPill == value){
+                    // put the pill back to the end of the queue so that other producers can exit
+                    queue.put(poisonPill);
+                    System.out.println("Consumed pill....");
+                    return true;
+                }
+                System.out.println("Consumed:: "+ value);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+}
